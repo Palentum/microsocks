@@ -35,6 +35,7 @@
 #include <limits.h>
 #include "server.h"
 #include "sblist.h"
+#include "bind2device.h"
 
 /* timeout in microseconds on resource exhaustion to prevent excessive
    cpu usage. */
@@ -67,6 +68,7 @@
 static int quiet;
 static const char* auth_user;
 static const char* auth_pass;
+static const char* bind_device;
 static sblist* auth_ips;
 static pthread_rwlock_t auth_ips_lock = PTHREAD_RWLOCK_INITIALIZER;
 static const struct server* server;
@@ -188,6 +190,8 @@ static int connect_socks_target(unsigned char *buf, size_t n, struct client *cli
 	}
 	if(SOCKADDR_UNION_AF(&bind_addr) == raddr->ai_family &&
 	   bindtoip(fd, &bind_addr) == -1)
+		goto eval_errno;
+	if(bind_device && bind2device(fd, raddr->ai_family, bind_device) == -1)
 		goto eval_errno;
 	if(connect(fd, raddr->ai_addr, raddr->ai_addrlen) == -1)
 		goto eval_errno;
@@ -386,11 +390,12 @@ static int usage(void) {
 	dprintf(2,
 		"MicroSocks SOCKS5 Server\n"
 		"------------------------\n"
-		"usage: microsocks -1 -q -i listenip -p port -u user -P pass -b bindaddr -w ips\n"
+		"usage: microsocks -1 -q -i listenip -p port -u user -P pass -b bindaddr -B binddev -w ips\n"
 		"all arguments are optional.\n"
 		"by default listenip is 0.0.0.0 and port 1080.\n\n"
 		"option -q disables logging.\n"
 		"option -b specifies which ip outgoing connections are bound to\n"
+		"option -B specifies the network interface outgoing connections are bound to\n"
 		"option -w allows to specify a comma-separated whitelist of ip addresses,\n"
 		" that may use the proxy without user/pass authentication.\n"
 		" e.g. -w 127.0.0.1,192.168.1.1.1,::1 or just -w 10.0.0.1\n"
@@ -416,7 +421,7 @@ int main(int argc, char** argv) {
 	const char *listenip = "0.0.0.0";
 	char *p, *q;
 	unsigned port = 1080;
-	while((ch = getopt(argc, argv, ":1qb:i:p:u:P:w:")) != -1) {
+	while((ch = getopt(argc, argv, ":1qb:B:i:p:u:P:w:")) != -1) {
 		switch(ch) {
 			case 'w': /* fall-through */
 			case '1':
@@ -441,6 +446,10 @@ int main(int argc, char** argv) {
 				break;
 			case 'b':
 				resolve_sa(optarg, 0, &bind_addr);
+				break;
+			case 'B':
+				bind_device = strdup(optarg);
+				zero_arg(optarg);
 				break;
 			case 'u':
 				auth_user = strdup(optarg);
@@ -470,6 +479,19 @@ int main(int argc, char** argv) {
 	if(auth_ips && !auth_pass) {
 		dprintf(2, "error: -1/-w options must be used together with user/pass\n");
 		return 1;
+	}
+	if(bind_device) {
+		int testfd = socket(AF_INET, SOCK_STREAM, 0);
+		if(testfd == -1) {
+			perror("socket");
+			return 1;
+		}
+		if(bind2device(testfd, AF_INET, bind_device) == -1) {
+			dprintf(2, "error: bind to device '%s' failed: %s\n", bind_device, strerror(errno));
+			close(testfd);
+			return 1;
+		}
+		close(testfd);
 	}
 	signal(SIGPIPE, SIG_IGN);
 	struct server s;

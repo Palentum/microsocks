@@ -41,13 +41,14 @@ libc is not even 50 KB. that's easily usable even on the cheapest routers.
 command line options
 --------------------
 
-    microsocks -1 -q -i listenip -p port -u user -P passw -b bindaddr -w wl
+    microsocks -1 -q -i listenip -p port -u user -P passw -b bindaddr -B binddev -w wl
 
 all arguments are optional.
 by default listenip is 0.0.0.0 and port 1080.
 
 - option -q disables logging.
 - option -b specifies which ip outgoing connections are bound to
+- option -B specifies which network interface outgoing connections are bound to
 - option -w allows to specify a comma-separated whitelist of ip addresses,
 that may use the proxy without user/pass authentication.
 e.g. -w 127.0.0.1,192.168.1.1.1,::1 or just -w 10.0.0.1
