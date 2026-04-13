@@ -163,11 +163,23 @@ static int connect_socks_target(unsigned char *buf, size_t n, struct client *cli
 	/* there's no suitable errorcode in rfc1928 for dns lookup failure */
 	if(resolve(namebuf, port, &remote)) return -EC_GENERAL_FAILURE;
 	struct addrinfo* raddr = addr_choose(remote, &bind_addr);
-	int fd = socket(raddr->ai_family, SOCK_STREAM, 0);
-	if(fd == -1) {
-		eval_errno:
+	int fd = -1;
+	int last_err = EBADF;
+	struct addrinfo* r;
+	for(r = raddr; r; r = r->ai_next) {
+		if(fd != -1) { close(fd); fd = -1; }
+		fd = socket(r->ai_family, SOCK_STREAM, 0);
+		if(fd == -1) { last_err = errno; continue; }
+		if(SOCKADDR_UNION_AF(&bind_addr) == r->ai_family &&
+		   bindtoip(fd, &bind_addr) == -1) { last_err = errno; continue; }
+		if(bind_device && bind2device(fd, r->ai_family, bind_device) == -1) { last_err = errno; continue; }
+		if(connect(fd, r->ai_addr, r->ai_addrlen) == -1) { last_err = errno; continue; }
+		break;
+	}
+	if(!r) {
 		if(fd != -1) close(fd);
 		freeaddrinfo(remote);
+		errno = last_err;
 		switch(errno) {
 			case ETIMEDOUT:
 				return -EC_TTL_EXPIRED;
@@ -188,14 +200,6 @@ static int connect_socks_target(unsigned char *buf, size_t n, struct client *cli
 			return -EC_GENERAL_FAILURE;
 		}
 	}
-	if(SOCKADDR_UNION_AF(&bind_addr) == raddr->ai_family &&
-	   bindtoip(fd, &bind_addr) == -1)
-		goto eval_errno;
-	if(bind_device && bind2device(fd, raddr->ai_family, bind_device) == -1)
-		goto eval_errno;
-	if(connect(fd, raddr->ai_addr, raddr->ai_addrlen) == -1)
-		goto eval_errno;
-
 	freeaddrinfo(remote);
 	if(CONFIG_LOG) {
 		char clientname[256];
